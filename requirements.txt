@@ -1,0 +1,7 @@
+apache-beam[gcp]==2.60.0
+google-cloud-core
+simplejson
+pytz
+pybase64
+pymysql
+sqlalchemy
