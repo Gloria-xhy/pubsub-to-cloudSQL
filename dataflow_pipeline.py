@@ -10,55 +10,22 @@ from sqlalchemy.exc import IntegrityError
 # 设置日志级别为 INFO
 logging.basicConfig(level=logging.INFO)
 
-# 全局变量，用于记录已创建的表和 schema 信息
-SCHEMA_DICT = {}
-CREATED_TABLES = set()
-
-class SchemaManager:
-    """管理 Cloud SQL schema 的类，负责生成和更新 schema"""
+class WriteToCloudSQL(beam.DoFn):
+    """将数据写入 Cloud SQL"""
     def __init__(self, db_connection_string):
         self.engine = create_engine(db_connection_string)
 
-    def load_existing_tables(self):
-        """加载数据库中的所有表名"""
-        global CREATED_TABLES
+    def process(self, element):
+        table_name, row = element
         try:
+            insert_query = f"INSERT INTO {table_name} ({', '.join(row.keys())}) VALUES ({', '.join([':' + key for key in row.keys()])})"
             with self.engine.connect() as connection:
-                result = connection.execute("SHOW TABLES;")
-                CREATED_TABLES = {row[0] for row in result}
-                logging.info(f"Loaded existing tables: {CREATED_TABLES}")
+                connection.execute(insert_query, row)
+                logging.info(f"Inserted row into {table_name}: {row}")
+        except IntegrityError as e:
+            logging.error(f"Integrity error: {e}")
         except Exception as e:
-            logging.error(f"Error loading existing tables: {e}")
-
-    def create_table(self, table_name, schema):
-        """检查并在必要时创建 Cloud SQL 表"""
-        global CREATED_TABLES
-        if table_name in CREATED_TABLES:
-            return
-
-        create_statement = f"CREATE TABLE {table_name} ({', '.join(f'{field.name} {field.type_}' for field in schema)});"
-        try:
-            with self.engine.connect() as connection:
-                connection.execute(create_statement)
-                logging.info(f"Created table {table_name} with schema: {schema}")
-                CREATED_TABLES.add(table_name)
-        except Exception as e:
-            logging.error(f"Error creating table {table_name}: {e}")
-
-    def determine_sql_type(self, value, key):
-        """根据值的类型确定 SQL 字段类型"""
-        if isinstance(value, str):
-            return f"{key} VARCHAR(255)"
-        elif isinstance(value, bool):
-            return f"{key} BOOLEAN"
-        elif isinstance(value, int):
-            return f"{key} INT"
-        elif isinstance(value, float):
-            return f"{key} FLOAT"
-        elif isinstance(value, datetime):
-            return f"{key} TIMESTAMP"
-        else:
-            return f"{key} VARCHAR(255)"
+            logging.error(f"Error writing to Cloud SQL: {e}")
 
 class DecodeAndProcessMessage(beam.DoFn):
     """解码和初步处理 Pub/Sub 消息"""
@@ -96,6 +63,7 @@ class DecodeAndProcessMessage(beam.DoFn):
                 "uuid": uuid
             }
 
+            # 这里可以将其他属性添加到 row 中
             filtered_properties = {
                 ('obus_' + k[1:] if k.startswith('$') else k): v
                 for k, v in properties.items()
@@ -103,71 +71,23 @@ class DecodeAndProcessMessage(beam.DoFn):
 
             row.update(filtered_properties)
 
-            transformed_row = {key.lower(): json.dumps(value) if isinstance(value, (dict, list)) else str(value) for key, value in row.items()}
+            transformed_row = {key.lower(): str(value) for key, value in row.items()}
 
-            table_name = f"{event_group}_{event_id}_ProcessedMessage"
+            table_name = "table1"  # 替换为实际的表名
             yield (table_name, transformed_row)
         except Exception as e:
             logging.error(f"Error processing message: {e}")
 
-class CollectSchemaUpdates(beam.DoFn):
-    """收集需要更新的 schema 信息"""
-    def __init__(self, schema_manager):
-        self.schema_manager = schema_manager
-
-    def process(self, element):
-        table_name, row = element
-        existing_schema = SCHEMA_DICT.get(table_name, [])
-        current_fields = {field.name for field in existing_schema}
-        new_fields = []
-
-        for key, value in row.items():
-            if key.lower() not in current_fields:
-                new_field = self.schema_manager.determine_sql_type(value, key.lower())
-                new_fields.append(new_field)
-                current_fields.add(key.lower())
-
-        yield (table_name, new_fields, row)
-
-class UpdateSchemaOnce(beam.DoFn):
-    """统一新建表和更新 schema"""
-    def __init__(self, schema_manager):
-        self.schema_manager = schema_manager
-
-    def process(self, element):
-        table_name, new_fields, row = element
-        self.schema_manager.create_table(table_name, new_fields)
-
-        yield (table_name, row)
-
-class WriteToCloudSQL(beam.DoFn):
-    """将数据写入 Cloud SQL"""
-    def __init__(self, db_connection_string):
-        self.engine = create_engine(db_connection_string)
-
-    def process(self, element):
-        table_name, row = element
-        try:
-            insert_query = f"INSERT INTO {table_name} ({', '.join(row.keys())}) VALUES ({', '.join([':' + key for key in row.keys()])})"
-            with self.engine.connect() as connection:
-                connection.execute(insert_query, row)
-                logging.info(f"Inserted row into {table_name}: {row}")
-        except IntegrityError as e:
-            logging.error(f"Integrity error: {e}")
-        except Exception as e:
-            logging.error(f"Error writing to Cloud SQL: {e}")
-
 def run(argv=None):
     options = PipelineOptions(argv)
     google_cloud_options = options.view_as(GoogleCloudOptions)
-    google_cloud_options.project = 'qpon-1c174'
-    google_cloud_options.region = 'us-central1'
+    google_cloud_options.project = 'qpon-1c174'  # 替换为您的项目ID
+    google_cloud_options.region = 'us-central1'  # 替换为您的区域
     google_cloud_options.job_name = f'xhy-dataflow-{datetime.now().strftime("%Y%m%d-%H%M%S")}'
-    google_cloud_options.staging_location = 'gs://xhy_bucket/templates/staging'
-    google_cloud_options.temp_location = 'gs://xhy_bucket/templates/temp'
+    google_cloud_options.staging_location = 'gs://xhy_bucket/templates/staging'  # 替换为您的 Cloud Storage 路径
+    google_cloud_options.temp_location = 'gs://xhy_bucket/templates/temp'  # 替换为您的 Cloud Storage 路径
 
     worker_options = options.view_as(WorkerOptions)
-    worker_options.sdk_container_image = 'gcr.io/qpon-1c174/xhy_image:latest'
     worker_options.max_num_workers = 2
     worker_options.autoscaling_algorithm = 'THROUGHPUT_BASED'
 
@@ -177,38 +97,16 @@ def run(argv=None):
     setup_options.save_main_session = True
 
     db_connection_string = 'mysql+pymysql://xhy:12345@34.170.50.115:3306/xhy-test'  # 替换为实际的连接字符串
-    schema_manager = SchemaManager(db_connection_string)
-    schema_manager.load_existing_tables()  # 初始化时加载现有表名
-
     with beam.Pipeline(options=options) as p:
         # 1. 读取并解码数据
         messages = (
             p
-            | "Read from Pub/Sub" >> beam.io.ReadFromPubSub(topic='projects/qpon-1c174/topics/QponPagesTopic')
+            | "Read from Pub/Sub" >> beam.io.ReadFromPubSub(topic='projects/qpon-1c174/topics/QponPagesTopic')  # 替换为您的 Pub/Sub 主题
             | "Decode and Process Message" >> beam.ParDo(DecodeAndProcessMessage())
         )
-        
-        # 2. 分窗口并按表名分组
-        grouped_messages = (
-            messages
-            | "Window into Fixed Windows" >> beam.WindowInto(beam.window.FixedWindows(300))
-            | "Group by Table Name" >> beam.GroupByKey()
-        )
-        
-        # 3. 收集需要更新的 schema 信息
-        schema_updates = (
-            grouped_messages
-            | "Collect Schema Updates" >> beam.ParDo(CollectSchemaUpdates(schema_manager))
-        )
-        
-        # 4. 统一新建表和更新 schema
-        updated_tables = (
-            schema_updates
-            | "Update Schema Once" >> beam.ParDo(UpdateSchemaOnce(schema_manager))
-        )
 
-        # 5. 写入 Cloud SQL
-        updated_tables | "Write to Cloud SQL" >> beam.ParDo(WriteToCloudSQL(db_connection_string))
+        # 2. 写入 Cloud SQL
+        messages | "Write to Cloud SQL" >> beam.ParDo(WriteToCloudSQL(db_connection_string))
 
 if __name__ == '__main__':
     run()
