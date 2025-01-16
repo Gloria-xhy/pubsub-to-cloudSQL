@@ -195,7 +195,7 @@ def run(argv=None):
     google_cloud_options.temp_location = 'gs://qpon-dataflow-mysql/temp'
 
     worker_options = options.view_as(WorkerOptions)
-    worker_options.sdk_container_image = 'gcr.io/qpon-dataflow-mysql/qpon-dataflow-mysql_image:latest'
+    worker_options.sdk_container_image = 'gcr.io/oppo-gcp-prod-digfood-129869/qpon-dataflow-mysql_image:latest'
     worker_options.max_num_workers = 2  # 设置最大 worker 数量
     worker_options.autoscaling_algorithm = 'THROUGHPUT_BASED'  # 启用基于吞吐量的自动缩放
 
