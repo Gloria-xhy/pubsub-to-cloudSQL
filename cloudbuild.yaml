@@ -2,13 +2,13 @@ steps:
   # Docker Build
   - name: 'gcr.io/cloud-builders/docker'
     args: ['build', '-t', 
-           'gcr.io/oppo-gcp-prod-digfood-129869/qpon-dataflow-mysql_image:latest', 
+           'gcr.io/qpon-dataflow-mysql/qpon-dataflow-mysql_image:latest', 
            '.']
 
   # Docker Push
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 
-           'gcr.io/oppo-gcp-prod-digfood-129869/qpon-dataflow-mysql_image:latest']
+           'gcr.io/qpon-dataflow-mysql/qpon-dataflow-mysql_image:latest']
 
   # Entrypoint, timeout and environment variables
   # Dataflow Flex Template
@@ -17,7 +17,7 @@ steps:
     args: [
       'dataflow', 'flex-template', 'build',
       'gs://qpon-dataflow-mysql/templates/pubsub-CloudSQL-template.json',  # 替换为您的 Cloud Storage 路径
-      '--image-gcr-path', 'gcr.io/oppo-gcp-prod-digfood-129869/qpon-dataflow-mysql_image:latest', 
+      '--image-gcr-path', 'gcr.io/qpon-dataflow-mysql/qpon-dataflow-mysql_image:latest', 
       '--flex-template-base-image','PYTHON3',  #必须有
       '--py-path','.',  #必须有
       '--sdk-language', 'PYTHON',
@@ -26,7 +26,7 @@ steps:
     ]
 
 timeout: 600s  # 超时时间可以根据需要调整      
-logsBucket: 'gs://oppo-gcp-prod-digfood-129869'
+logsBucket: 'gs://qpon-dataflow-mysql'
 
 # [END cloudbuild_basic_config]
 
