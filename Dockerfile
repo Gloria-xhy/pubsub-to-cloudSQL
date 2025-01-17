@@ -1,4 +1,4 @@
-FROM apache/beam_python3.9_sdk:2.59.0
+FROM apache/beam_python3.10_sdk:2.59.0
 WORKDIR /app
 COPY . /app
 RUN pip install --no-cache-dir -r requirements.txt
