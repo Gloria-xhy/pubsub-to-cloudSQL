@@ -3,5 +3,5 @@ WORKDIR /app
 COPY . /app
 RUN pip install --no-cache-dir -r requirements.txt
 ENV FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE="${WORKDIR}/requirements.txt"
-ENV FLEX_TEMPLATE_PYTHON_PY_FILE="${WORKDIR}/dataflow_pipeline.py"
+ENV FLEX_TEMPLATE_PYTHON_PY_FILE="${WORKDIR}/demo3.py"
 
