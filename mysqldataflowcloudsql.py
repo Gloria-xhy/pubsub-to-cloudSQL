@@ -17,7 +17,7 @@ beam_options = PipelineOptions(
     streaming=True
 )
 
-class QueryCloudSQL2(beam.DoFn):
+class WriteCloudSQL(beam.DoFn):
     def __init__(self, db_config):
         self.db_config = db_config
         self.table_schemas = {}
@@ -50,16 +50,20 @@ class QueryCloudSQL2(beam.DoFn):
                     logging.error(f"Could not determine type for column {column}, skipping.")
                     continue
                 logging.warning(f"Adding column {column} of type {column_type} to table {schema_name}.{table_name}")
-                with connection.cursor() as cursor:
-                    cursor.execute(f"ALTER TABLE `{schema_name}`.`{table_name}` ADD COLUMN `{column}` {column_type}")
-                connection.commit()
-                # Re-fetch the schema after adding the column
-                current_schema = self.get_table_schema(connection, schema_name, table_name)
-                if column not in current_schema:
-                    logging.error(f"Failed to add column {column} to table {schema_name}.{table_name}, skipping.")
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(f"ALTER TABLE `{schema_name}`.`{table_name}` ADD COLUMN `{column}` {column_type}")
+                    connection.commit()
+                    # Re-fetch the schema after adding the column
+                    current_schema = self.get_table_schema(connection, schema_name, table_name)
+                    if column not in current_schema:
+                        logging.error(f"Failed to add column {column} to table {schema_name}.{table_name}, skipping.")
+                        return False
+                except Exception as e:
+                    logging.error(f"Error adding column {column} to table {schema_name}.{table_name}: {e}")
                     return False
-            return True
         return True
+
 
     def process(self, element):
         if element is None:
@@ -112,6 +116,7 @@ class QueryCloudSQL2(beam.DoFn):
             table_schema = self.get_table_schema(connection, schema_name, table_name)
             logging.info(f"Retrieved table schema: {table_schema}")
 
+            connection.begin()  # 开始事务
             with connection.cursor() as cursor:
                 if event_type == 'INSERT':
                     # 检查表结构
@@ -162,6 +167,7 @@ class QueryCloudSQL2(beam.DoFn):
                     params = list(after_data.values()) + list(key_values.values())
                     logging.info(f"Executing UPDATE SQL: {sql} with params: {params}")
                     cursor.execute(sql, params)
+                    logging.info(f"Affected rows: {cursor.rowcount}")
                     if cursor.rowcount == 0:
                         logging.warning(f"No rows updated for SQL: {sql} with params: {params}")
                         # 尝试插入数据
@@ -214,14 +220,16 @@ class QueryCloudSQL2(beam.DoFn):
                     params = list(key_values.values())
                     logging.info(f"Executing DELETE SQL: {sql} with params: {params}")
                     cursor.execute(sql, params)
+                    logging.info(f"Affected rows: {cursor.rowcount}")
                     if cursor.rowcount == 0:
                         logging.warning(f"No rows deleted for SQL: {sql} with params: {params}")
                     else:
                         logging.info(f"DELETE successful for table {schema_name}.{table_name}")
-                # 提交事务
-                connection.commit()
-                logging.info(f"{event_type} successful for table {schema_name}.{table_name}")
+            connection.commit()  # 提交事务
+
+            logging.info(f"{event_type} successful for table {schema_name}.{table_name}")
         except Exception as e:
+            connection.rollback()  # 回滚事务
             logging.error(f"Error occurred while {event_type.lower()}ing into Cloud SQL: {e}")
         finally:
             connection.close()
@@ -244,7 +252,7 @@ def run():
             pipeline
             | 'ReadFromPubSub' >> beam.io.ReadFromPubSub(
                 subscription='projects/oppo-gcp-prod-digfood-129869/subscriptions/qpon-digital-food-topic-sub-3')
-            | 'QueryCloudSQL' >> beam.ParDo(QueryCloudSQL2(db_config))
+            | 'WriteCloudSQL' >> beam.ParDo(WriteCloudSQL(db_config))
             | 'PrintQueryResult' >> beam.Map(lambda x: logging.info(f"Processed element: {x}"))
         )
 
