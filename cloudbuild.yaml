@@ -1,32 +1,33 @@
+substitutions:
+  _IMAGE_NAME: 'gcr.io/oppo-gcp-prod-digfood-129869/qpon-dataflow-mysql_image'
+  _TAG: 'latest'  # 设置全局变量 TAG
+
 steps:
+  # 删除同名镜像
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['rmi', '-f', '${_IMAGE_NAME}:${_TAG}']  # 删除之前的镜像
+
   # Docker Build
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 
-           'gcr.io/oppo-gcp-prod-digfood-129869/qpon-dataflow-mysql_image:latest', 
-           '.']
+    args: ['build', '-t', '${_IMAGE_NAME}:${_TAG}', '.']
 
   # Docker Push
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 
-           'gcr.io/oppo-gcp-prod-digfood-129869/qpon-dataflow-mysql_image:latest']
+    args: ['push', '${_IMAGE_NAME}:${_TAG}']
 
-  # Entrypoint, timeout and environment variables
   # Dataflow Flex Template
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
     args: [
       'dataflow', 'flex-template', 'build',
-      'gs://qpon-dataflow-mysql/templates/pubsub-CloudSQL-template.json',  # 替换为您的 Cloud Storage 路径
-      '--image-gcr-path', 'gcr.io/oppo-gcp-prod-digfood-129869/qpon-dataflow-mysql_image:latest', 
-      '--flex-template-base-image','PYTHON3',  #必须有
-      '--py-path','.',  #必须有
+      'gs://qpon-dataflow-mysql/templates/pubsub-CloudSQL-template.json',
+      '--image-gcr-path', '${_IMAGE_NAME}:${_TAG}',
+      '--flex-template-base-image', 'PYTHON3',
+      '--py-path', '.',
       '--sdk-language', 'PYTHON',
       '--env', 'FLEX_TEMPLATE_PYTHON_PY_FILE=mysqldataflowcloudsql.py',
       '--env', 'FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE=requirements.txt'
     ]
 
-timeout: 600s  # 超时时间可以根据需要调整      
+timeout: 600s  # 超时时间
 logsBucket: 'gs://qpon-dataflow-mysql'
-
-# [END cloudbuild_basic_config]
-
