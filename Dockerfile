@@ -4,4 +4,4 @@ COPY . /app
 RUN pip install --no-cache-dir -r requirements.txt
 ENV FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE="/app/requirements.txt"
 ENV FLEX_TEMPLATE_PYTHON_PY_FILE="/app/mysqldataflowcloudsql.py"
-
+CMD ["python", "/app/mysqldataflowcloudsql.py"]
