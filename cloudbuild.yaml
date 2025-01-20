@@ -1,11 +1,11 @@
 substitutions:
   _IMAGE_NAME: 'gcr.io/oppo-gcp-prod-digfood-129869/qpon-dataflow-mysql_image'
-  _TAG: 'latest'  # 设置全局变量 TAG
+  _TAG: 'rm'  # 设置全局变量 TAG
 
 steps:
   # 删除同名镜像
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['rmi', '-f', '${_IMAGE_NAME}:${_TAG}']  # 删除之前的镜像
+    args: ['rmi', '-f', '${_IMAGE_NAME}']  # 删除之前的镜像
 
   # Docker Build
   - name: 'gcr.io/cloud-builders/docker'
