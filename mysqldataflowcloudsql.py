@@ -10,7 +10,7 @@ logging.getLogger().setLevel(logging.INFO)
 # 定义 Pipeline 选项
 beam_options = PipelineOptions(
     runner='DataflowRunner',
-    setup_file='/home/jupyter/setup.py',
+    setup_file='./setup.py',
     project='oppo-gcp-prod-digfood-129869',
     temp_location='gs://qpon-dataflow-mysql/temp',
     max_num_workers=2,
