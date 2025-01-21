@@ -1,21 +1,15 @@
 substitutions:
-  _IMAGE_NAME: 'gcr.io/oppo-gcp-prod-digfood-129869/qpon-dataflow-mysql_image'
-  _TAG: 'rm'  # 设置全局变量 TAG
-  _PROJECT: 'oppo-gcp-prod-digfood-129869'
-  _LOCATION: 'us'
-  _REPOSITORY: 'gcr.io'
+  _IMAGE_NAME: 'asia-southeast2-docker.pkg.dev/oppo-gcp-prod-digfood-129869/qpon-test'
+  _TAG: '1.0'  # 设置全局变量 TAG
 
 steps:
   # 删除同名镜像
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['rmi', '-f', '${_IMAGE_NAME}']  # 删除之前的镜像
-
   - name: 'gcr.io/cloud-builders/gcloud'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        gcloud artifacts docker images delete ${_LOCATION}-docker.pkg.dev/${_PROJECT}/${_REPOSITORY}/${_IMAGE_NAME} --delete-tags --quiet || echo "No images to delete"
+        gcloud artifacts docker images delete ${_IMAGE_NAME} --delete-tags --quiet || echo "No images to delete"
 
   # Docker Build
   - name: 'gcr.io/cloud-builders/docker'
