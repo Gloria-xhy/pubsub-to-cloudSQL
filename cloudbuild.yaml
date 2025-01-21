@@ -1,5 +1,5 @@
 substitutions:
-  _IMAGE_NAME: 'asia-southeast2-docker.pkg.dev/oppo-gcp-prod-digfood-129869/qpon-test'
+  _IMAGE_NAME: 'asia-southeast2-docker.pkg.dev/oppo-gcp-prod-digfood-129869/qpon-test/test-image'
   _TAG: '1.0'  # 设置全局变量 TAG
 
 steps:
