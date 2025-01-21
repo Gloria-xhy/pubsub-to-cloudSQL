@@ -3,7 +3,7 @@ from apache_beam.options.pipeline_options import PipelineOptions
 import pymysql
 import json
 import logging
-import datetime
+import time
 
 # 设置日志级别
 logging.getLogger().setLevel(logging.INFO)
@@ -28,9 +28,9 @@ class WriteCloudSQL(beam.DoFn):
             return self.table_schemas[(schema_name, table_name)]
 
         with connection.cursor() as cursor:
-            cursor.execute(f"SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '{schema_name}' AND TABLE_NAME = '{table_name}'")
+            cursor.execute(f"SELECT COLUMN_NAME, DATA_TYPE, COLUMN_DEFAULT FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '{schema_name}' AND TABLE_NAME = '{table_name}'")
             columns = cursor.fetchall()
-            schema = {col[0]: col[1] for col in columns}
+            schema = {col[0]: (col[1], col[2]) for col in columns}  # Store both data type and default value
             self.table_schemas[(schema_name, table_name)] = schema
             return schema
 
@@ -69,31 +69,11 @@ class WriteCloudSQL(beam.DoFn):
         cleaned_data = {}
         for key, value in data.items():
             if key in table_schema:
-                column_type = table_schema[key].upper()
-                if column_type in ('INT', 'INTEGER', 'BIGINT', 'TINYINT', 'SMALLINT', 'MEDIUMINT'):
-                    if value == '' or value is None:
-                        cleaned_data[key] = None
-                    else:
-                        try:
-                            cleaned_data[key] = int(value)
-                        except ValueError:
-                            logging.error(f"Invalid integer value for column {key}: {value}, setting to None.")
-                            cleaned_data[key] = None
-                elif column_type in ('FLOAT', 'DOUBLE', 'DECIMAL', 'NUMERIC'):
-                    if value == '' or value is None:
-                        cleaned_data[key] = None
-                    else:
-                        try:
-                            cleaned_data[key] = float(value)
-                        except ValueError:
-                            logging.error(f"Invalid float value for column {key}: {value}, setting to None.")
-                            cleaned_data[key] = None
+                if value == '' or value is None:
+                    _, column_default = table_schema[key]
+                    cleaned_data[key] = column_default
                 else:
-                    # 直接处理其他类型的字段
-                    if value == '':
-                        cleaned_data[key] = None
-                    else:
-                        cleaned_data[key] = value
+                    cleaned_data[key] = value
             else:
                 logging.warning(f"Column {key} not found in table schema, skipping.")
         return cleaned_data
@@ -153,120 +133,150 @@ class WriteCloudSQL(beam.DoFn):
             after_data = self.clean_data(after_data, table_schema)
             before_data = self.clean_data(before_data, table_schema)
 
-            connection.begin()  # 开始事务
-            with connection.cursor() as cursor:
-                if event_type == 'INSERT':
-                    # 检查表结构
-                    if not all(col in table_schema for col in after_data.keys()):
-                        logging.error(f"Table schema mismatch for INSERT: {data}, skipping.")
-                        return
+            # 使用默认值替换 None
+            for key in after_data:
+                if after_data[key] is None and key in table_schema:
+                    _, column_default = table_schema[key]
+                    after_data[key] = column_default
 
-                    # 构建插入 SQL 语句
-                    columns = ', '.join(after_data.keys())
-                    placeholders = ', '.join(['%s'] * len(after_data))
-                    sql = f"INSERT INTO `{table_name}` ({columns}) VALUES ({placeholders})"
-                    logging.info(f"Executing INSERT SQL: {sql} with params: {list(after_data.values())}")
-                    cursor.execute(sql, list(after_data.values()))
-                    logging.info(f"INSERT successful for table {schema_name}.{table_name}")
-                elif event_type == 'UPDATE':
-                    # 检查 before_data 是否为空
-                    if not before_data:
-                        logging.error(f"before_data is empty, cannot perform UPDATE: {data}, skipping.")
-                        return
+            for key in before_data:
+                if before_data[key] is None and key in table_schema:
+                    _, column_default = table_schema[key]
+                    before_data[key] = column_default
 
-                    # 检查 key_names 是否为空
-                    if not key_names:
-                        logging.error(f"keyNames is empty, cannot perform UPDATE: {data}, skipping.")
-                        return
+            max_retries = 3
+            retry_delay = 1  # 秒
 
-                    # 从 beforeColumns 中提取主键值
-                    key_values = {}
-                    for key_name in key_names:
-                        key_value = None
-                        for col in before_columns:
-                            if col['columnName'] == key_name:
-                                key_value = col['columnValue']
-                                break
-                        if key_value is None:
-                            logging.error(f"Could not find '{key_name}' in beforeColumns, cannot perform UPDATE: {data}, skipping.")
-                            return
-                        key_values[key_name] = key_value
+            for attempt in range(max_retries):
+                try:
+                    connection.begin()  # 开始事务
+                    with connection.cursor() as cursor:
+                        if event_type == 'INSERT':
+                            # 检查表结构
+                            if not all(col in table_schema for col in after_data.keys()):
+                                logging.error(f"Table schema mismatch for INSERT: {data}, skipping.")
+                                return
 
-                    # 检查表结构
-                    if not all(col in table_schema for col in after_data.keys()):
-                        logging.error(f"Table schema mismatch for UPDATE: {data}, skipping.")
-                        return
+                            # 构建插入 SQL 语句
+                            columns = ', '.join(after_data.keys())
+                            placeholders = ', '.join(['%s'] * len(after_data))
+                            sql = f"INSERT INTO `{table_name}` ({columns}) VALUES ({placeholders})"
+                            logging.info(f"Executing INSERT SQL: {sql} with params: {list(after_data.values())}")
+                            cursor.execute(sql, list(after_data.values()))
+                            logging.info(f"INSERT successful for table {schema_name}.{table_name}")
+                        elif event_type == 'UPDATE':
+                            # 检查 before_data 是否为空
+                            if not before_data:
+                                logging.error(f"before_data is empty, cannot perform UPDATE: {data}, skipping.")
+                                return
 
-                    # 构建更新 SQL 语句
-                    set_clause = ', '.join([f"{col} = %s" for col in after_data.keys()])
-                    where_clause = ' AND '.join([f"{key} = %s" for key in key_values.keys()])
-                    sql = f"UPDATE `{table_name}` SET {set_clause} WHERE {where_clause}"
-                    params = list(after_data.values()) + list(key_values.values())
-                    logging.info(f"Executing UPDATE SQL: {sql} with params: {params}")
-                    cursor.execute(sql, params)
-                    logging.info(f"Affected rows: {cursor.rowcount}")
-                    if cursor.rowcount == 0:
-                        logging.warning(f"No rows updated for SQL: {sql} with params: {params}")
-                        # 尝试插入数据
-                        logging.info(f"Attempting to insert data as no rows were updated.")
-                        if not all(col in table_schema for col in after_data.keys()):
-                            logging.error(f"Table schema mismatch for INSERT: {data}, skipping.")
-                            return
+                            # 检查 key_names 是否为空
+                            if not key_names:
+                                logging.error(f"keyNames is empty, cannot perform UPDATE: {data}, skipping.")
+                                return
 
-                        # 构建插入 SQL 语句
-                        columns = ', '.join(after_data.keys())
-                        placeholders = ', '.join(['%s'] * len(after_data))
-                        sql = f"INSERT INTO `{table_name}` ({columns}) VALUES ({placeholders})"
-                        logging.info(f"Executing INSERT SQL: {sql} with params: {list(after_data.values())}")
-                        cursor.execute(sql, list(after_data.values()))
-                        logging.info(f"INSERT successful for table {schema_name}.{table_name}")
+                            # 从 beforeColumns 中提取主键值
+                            key_values = {}
+                            for key_name in key_names:
+                                key_value = None
+                                for col in before_columns:
+                                    if col['columnName'] == key_name:
+                                        key_value = col['columnValue']
+                                        break
+                                if key_value is None:
+                                    logging.error(f"Could not find '{key_name}' in beforeColumns, cannot perform UPDATE: {data}, skipping.")
+                                    return
+                                key_values[key_name] = key_value
+
+                            # 检查表结构
+                            if not all(col in table_schema for col in after_data.keys()):
+                                logging.error(f"Table schema mismatch for UPDATE: {data}, skipping.")
+                                return
+
+                            # 构建更新 SQL 语句
+                            set_clause = ', '.join([f"{col} = %s" for col in after_data.keys()])
+                            where_clause = ' AND '.join([f"{key} = %s" for key in key_values.keys()])
+                            sql = f"UPDATE `{table_name}` SET {set_clause} WHERE {where_clause}"
+                            params = list(after_data.values()) + list(key_values.values())
+                            logging.info(f"Executing UPDATE SQL: {sql} with params: {params}")
+                            cursor.execute(sql, params)
+                            logging.info(f"Affected rows: {cursor.rowcount}")
+                            if cursor.rowcount == 0:
+                                logging.warning(f"No rows updated for SQL: {sql} with params: {params}")
+                                # 尝试插入数据
+                                logging.info(f"Attempting to insert data as no rows were updated.")
+                                if not all(col in table_schema for col in after_data.keys()):
+                                    logging.error(f"Table schema mismatch for INSERT: {data}, skipping.")
+                                    return
+
+                                # 构建插入 SQL 语句
+                                columns = ', '.join(after_data.keys())
+                                placeholders = ', '.join(['%s'] * len(after_data))
+                                sql = f"INSERT INTO `{table_name}` ({columns}) VALUES ({placeholders})"
+                                logging.info(f"Executing INSERT SQL: {sql} with params: {list(after_data.values())}")
+                                cursor.execute(sql, list(after_data.values()))
+                                logging.info(f"INSERT successful for table {schema_name}.{table_name}")
+                            else:
+                                logging.info(f"UPDATE successful for table {schema_name}.{table_name}")
+                        elif event_type == 'DELETE':
+                            # 检查 before_data 是否为空
+                            if not before_data:
+                                logging.error(f"before_data is empty, cannot perform DELETE: {data}, skipping.")
+                                return
+
+                            # 检查 key_names 是否为空
+                            if not key_names:
+                                logging.error(f"keyNames is empty, cannot perform DELETE: {data}, skipping.")
+                                return
+
+                            # 从 beforeColumns 中提取主键值
+                            key_values = {}
+                            for key_name in key_names:
+                                key_value = None
+                                for col in before_columns:
+                                    if col['columnName'] == key_name:
+                                        key_value = col['columnValue']
+                                        break
+                                if key_value is None:
+                                    logging.error(f"Could not find '{key_name}' in beforeColumns, cannot perform DELETE: {data}, skipping.")
+                                    return
+                                key_values[key_name] = key_value
+
+                            # 检查表结构
+                            if not all(col in table_schema for col in key_values.keys()):
+                                logging.error(f"Table schema mismatch for DELETE: {data}, skipping.")
+                                return
+
+                            # 构建删除 SQL 语句
+                            where_clause = ' AND '.join([f"{key} = %s" for key in key_values.keys()])
+                            sql = f"DELETE FROM `{table_name}` WHERE {where_clause}"
+                            params = list(key_values.values())
+                            logging.info(f"Executing DELETE SQL: {sql} with params: {params}")
+                            cursor.execute(sql, params)
+                            logging.info(f"Affected rows: {cursor.rowcount}")
+                            if cursor.rowcount == 0:
+                                logging.warning(f"No rows deleted for SQL: {sql} with params: {params}")
+                            else:
+                                logging.info(f"DELETE successful for table {schema_name}.{table_name}")
+                    connection.commit()  # 提交事务
+                    logging.info(f"{event_type} successful for table {schema_name}.{table_name}")
+                    break  # 成功执行事务，退出重试循环
+                except pymysql.err.OperationalError as e:
+                    if e.args[0] == 1213:  # Deadlock error code
+                        logging.warning(f"Deadlock detected, retrying transaction (attempt {attempt + 1}/{max_retries})")
+                        connection.rollback()  # 回滚事务
+                        import time
+                        time.sleep(retry_delay)  # 等待一段时间后重试
                     else:
-                        logging.info(f"UPDATE successful for table {schema_name}.{table_name}")
-                elif event_type == 'DELETE':
-                    # 检查 before_data 是否为空
-                    if not before_data:
-                        logging.error(f"before_data is empty, cannot perform DELETE: {data}, skipping.")
-                        return
-
-                    # 检查 key_names 是否为空
-                    if not key_names:
-                        logging.error(f"keyNames is empty, cannot perform DELETE: {data}, skipping.")
-                        return
-
-                    # 从 beforeColumns 中提取主键值
-                    key_values = {}
-                    for key_name in key_names:
-                        key_value = None
-                        for col in before_columns:
-                            if col['columnName'] == key_name:
-                                key_value = col['columnValue']
-                                break
-                        if key_value is None:
-                            logging.error(f"Could not find '{key_name}' in beforeColumns, cannot perform DELETE: {data}, skipping.")
-                            return
-                        key_values[key_name] = key_value
-
-                    # 检查表结构
-                    if not all(col in table_schema for col in key_values.keys()):
-                        logging.error(f"Table schema mismatch for DELETE: {data}, skipping.")
-                        return
-
-                    # 构建删除 SQL 语句
-                    where_clause = ' AND '.join([f"{key} = %s" for key in key_values.keys()])
-                    sql = f"DELETE FROM `{table_name}` WHERE {where_clause}"
-                    params = list(key_values.values())
-                    logging.info(f"Executing DELETE SQL: {sql} with params: {params}")
-                    cursor.execute(sql, params)
-                    logging.info(f"Affected rows: {cursor.rowcount}")
-                    if cursor.rowcount == 0:
-                        logging.warning(f"No rows deleted for SQL: {sql} with params: {params}")
-                    else:
-                        logging.info(f"DELETE successful for table {schema_name}.{table_name}")
-            connection.commit()  # 提交事务
-            logging.info(f"{event_type} successful for table {schema_name}.{table_name}")
+                        logging.error(f"Error occurred while {event_type.lower()}ing into Cloud SQL: {e}")
+                        connection.rollback()  # 回滚事务
+                        break  # 其他错误，退出重试循环
+                except Exception as e:
+                    logging.error(f"Error occurred while {event_type.lower()}ing into Cloud SQL: {e}")
+                    connection.rollback()  # 回滚事务
+                    break  # 其他错误，退出重试循环
         except Exception as e:
-            connection.rollback()  # 回滚事务
-            logging.error(f"Error occurred while {event_type.lower()}ing into Cloud SQL: {e}")
+            logging.error(f"Error occurred while processing element: {e}")
         finally:
             connection.close()
 
