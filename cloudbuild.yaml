@@ -1,7 +1,8 @@
 substitutions:
-  _IMAGE_NAME: 'asia-southeast2-docker.pkg.dev/oppo-gcp-prod-digfood-129869/qpon-test'
+  _IMAGE_NAME: 'oppo-gcp-prod-digfood-129869/qpon-test'
   _TAG: '1.0'  # 设置全局变量 TAG
-
+  _LOCATION: 'asia-southeast2'
+  
 steps:
   # 删除同名镜像
   - name: 'gcr.io/cloud-builders/gcloud'
@@ -9,7 +10,7 @@ steps:
     args:
       - '-c'
       - |
-        gcloud artifacts docker images delete ${_IMAGE_NAME} --delete-tags --quiet || echo "No images to delete"
+        gcloud artifacts docker images delete ${_LOCATION}-docker.pkg.dev/${_IMAGE_NAME} --delete-tags --quiet || echo "No images to delete"
 
   # Docker Build
   - name: 'gcr.io/cloud-builders/docker'
