@@ -251,7 +251,7 @@ def run():
         query_cloudsql = (
             pipeline
             | 'ReadFromPubSub' >> beam.io.ReadFromPubSub(
-                subscription='projects/oppo-gcp-prod-digfood-129869/subscriptions/qpon-digital-food-topic-sub-3')
+                subscription='projects/oppo-gcp-prod-digfood-129869/subscriptions/qpon-mysql-sync-events-topic-sub')
             | 'WriteCloudSQL' >> beam.ParDo(WriteCloudSQL(db_config))
             | 'PrintQueryResult' >> beam.Map(lambda x: logging.info(f"Processed element: {x}"))
         )
