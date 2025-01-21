@@ -11,13 +11,13 @@ steps:
       - |
         gcloud artifacts docker images delete ${_IMAGE_NAME} --delete-tags --quiet || echo "No images to delete"
 
-  # Docker Build
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', '${_IMAGE_NAME}:${_TAG}', '.']
+  # # Docker Build
+  # - name: 'gcr.io/cloud-builders/docker'
+  #   args: ['build', '-t', '${_IMAGE_NAME}:${_TAG}', '.']
 
-  # Docker Push
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', '${_IMAGE_NAME}:${_TAG}']
+  # # Docker Push
+  # - name: 'gcr.io/cloud-builders/docker'
+  #   args: ['push', '${_IMAGE_NAME}:${_TAG}']
 
   # Dataflow Flex Template
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
