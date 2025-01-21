@@ -3,6 +3,7 @@ from apache_beam.options.pipeline_options import PipelineOptions
 import pymysql
 import json
 import logging
+import datetime
 
 # 设置日志级别
 logging.getLogger().setLevel(logging.INFO)
@@ -64,6 +65,38 @@ class WriteCloudSQL(beam.DoFn):
                     return False
         return True
 
+    def clean_data(self, data, table_schema):
+        cleaned_data = {}
+        for key, value in data.items():
+            if key in table_schema:
+                column_type = table_schema[key].upper()
+                if column_type in ('INT', 'INTEGER', 'BIGINT', 'TINYINT', 'SMALLINT', 'MEDIUMINT'):
+                    if value == '' or value is None:
+                        cleaned_data[key] = None
+                    else:
+                        try:
+                            cleaned_data[key] = int(value)
+                        except ValueError:
+                            logging.error(f"Invalid integer value for column {key}: {value}, setting to None.")
+                            cleaned_data[key] = None
+                elif column_type in ('FLOAT', 'DOUBLE', 'DECIMAL', 'NUMERIC'):
+                    if value == '' or value is None:
+                        cleaned_data[key] = None
+                    else:
+                        try:
+                            cleaned_data[key] = float(value)
+                        except ValueError:
+                            logging.error(f"Invalid float value for column {key}: {value}, setting to None.")
+                            cleaned_data[key] = None
+                else:
+                    # 直接处理其他类型的字段
+                    if value == '':
+                        cleaned_data[key] = None
+                    else:
+                        cleaned_data[key] = value
+            else:
+                logging.warning(f"Column {key} not found in table schema, skipping.")
+        return cleaned_data
 
     def process(self, element):
         if element is None:
@@ -115,6 +148,10 @@ class WriteCloudSQL(beam.DoFn):
 
             table_schema = self.get_table_schema(connection, schema_name, table_name)
             logging.info(f"Retrieved table schema: {table_schema}")
+
+            # 清洗数据
+            after_data = self.clean_data(after_data, table_schema)
+            before_data = self.clean_data(before_data, table_schema)
 
             connection.begin()  # 开始事务
             with connection.cursor() as cursor:
@@ -226,7 +263,6 @@ class WriteCloudSQL(beam.DoFn):
                     else:
                         logging.info(f"DELETE successful for table {schema_name}.{table_name}")
             connection.commit()  # 提交事务
-
             logging.info(f"{event_type} successful for table {schema_name}.{table_name}")
         except Exception as e:
             connection.rollback()  # 回滚事务
@@ -248,7 +284,7 @@ db_config = {
 
 def run():
     with beam.Pipeline(options=beam_options) as pipeline:
-        query_cloudsql = (
+        (
             pipeline
             | 'ReadFromPubSub' >> beam.io.ReadFromPubSub(
                 subscription='projects/oppo-gcp-prod-digfood-129869/subscriptions/qpon-mysql-sync-events-topic-sub')
