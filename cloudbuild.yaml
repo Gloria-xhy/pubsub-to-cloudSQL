@@ -1,9 +1,9 @@
 substitutions:
-  _IMAGE_NAME: 'asia-southeast2-docker.pkg.dev/oppo-gcp-prod-digfood-129869/qpon-test/test-image'
-  _TAG: '1.0'  # 设置全局变量 TAG
+  _IMAGE_NAME: 'asia-southeast2-docker.pkg.dev/oppo-gcp-prod-digfood-129869/qpon-test/test-image'  # HOST-NAME/PROJECT-ID/REPOSITORY/IMAGE
+  _TAG: '1.1'  # 设置全局变量 TAG
 
 steps:
-  # 删除同名镜像
+  # 删除artifact registry中的同名镜像
   - name: 'gcr.io/cloud-builders/gcloud'
     entrypoint: 'bash'
     args:
