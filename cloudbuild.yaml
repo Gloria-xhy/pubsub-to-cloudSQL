@@ -1,6 +1,6 @@
 substitutions:
   _IMAGE_NAME: 'asia-southeast2-docker.pkg.dev/oppo-gcp-prod-digfood-129869/qpon-test/test-image'  # HOST-NAME/PROJECT-ID/REPOSITORY/IMAGE
-  _TAG: '1.1'  # 设置全局变量 TAG
+  _TAG: 'docker-build'  # 设置全局变量 TAG
 
 steps:
   # 删除artifact registry中的同名镜像
@@ -25,7 +25,7 @@ steps:
     args: [
       'dataflow', 'flex-template', 'build',
       'gs://qpon-dataflow-mysql/templates/pubsub-CloudSQL-template.json',
-      '--image-gcr-path', '${_IMAGE_NAME}:${_TAG}',
+      '--image-gcr-path', '${_IMAGE_NAME}:flex',
       '--flex-template-base-image', 'PYTHON3',
       '--py-path', '.',
       '--sdk-language', 'PYTHON',
